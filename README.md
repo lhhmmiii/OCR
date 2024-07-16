@@ -7,6 +7,7 @@ This project focuses on building an OCR (Optical Character Recognition) system t
 Currently, you can explore the demo using Gradio. The React-based demo will be available soon.
 
 [Link to Best Model](https://drive.google.com/file/d/1c_oNozp3ve1XECAJOuN3-b0kyeMiYb-E/view?usp=sharing)
+**Note: ** The model was trained on English data so it's not very good. I will label it myself using LabelImg software on Vietnamese data later.
 
 ## Features
 
