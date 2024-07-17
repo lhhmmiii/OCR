@@ -2,6 +2,7 @@ import json
 import cv2
 import gradio as gr
 from PIL import Image
+import numpy as np
 #
 from ultralytics import YOLO
 #
@@ -32,8 +33,10 @@ def OCR_bill(img_input):
       dict_invoice[name] = [content]
     else:
       dict_invoice[name].append(content)
-  return json.dumps(dict_invoice, indent=1)
+  return dict_invoice
 
+# img = cv2.imread('Example/test1.jpg')
+# result = OCR_bill(img)
 
 def gradio_OCR(img):
     img_cv2 = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -44,7 +47,7 @@ def gradio_OCR(img):
 iface = gr.Interface(
     fn=gradio_OCR,
     inputs=gr.Image(type="pil"),
-    outputs=gr.Textbox(label="OCR Result", type="json", default="{}"),
+    outputs=gr.Textbox(label="OCR Result"),
     title="Invoice OCR",
     description="Upload an image of an invoice and extract the text."
 )
