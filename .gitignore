@@ -1,1 +1,73 @@
-model/best.pt
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+venv.bak/
+
+# Pytest
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# macOS
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Docker
+docker-compose.override.yml
+
+# Data and model artifacts (ignore large or generated files)
+data/
+checkpoints/
+*.pt
+*.ckpt
+
+# Temporary files
+*.tmp
+*.temp
+
+# Thumbnails
+Thumbs.db
+
+# Result
+result/
