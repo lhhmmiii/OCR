@@ -5,3 +5,7 @@ opencv-python
 torch
 torchvision
 vietocr
+sqlalchemy
+alembic
+psycopg2-binary
+python-dotenv
