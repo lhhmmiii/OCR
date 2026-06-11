@@ -68,3 +68,6 @@ checkpoints/
 
 # Thumbnails
 Thumbs.db
+
+# Result
+result/
