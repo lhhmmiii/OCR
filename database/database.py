@@ -1,19 +1,18 @@
-"""
-database.py – Engine & session factory for PostgreSQL.
-
-Reads DATABASE_URL from environment with a sensible local default
-matching the docker-compose.yml configuration.
-"""
-
 import os
+from dotenv import load_dotenv
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-DATABASE_URL: str = os.getenv(
-    "DATABASE_URL",
-    "postgresql://admin:admin123@localhost:5432/invoices",
-)
+load_dotenv()
+
+POSTGRES_USER = os.getenv("POSTGRES_USER", "admin")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "admin123")
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "invoices")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 engine = create_engine(
     DATABASE_URL,

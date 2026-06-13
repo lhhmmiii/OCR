@@ -1,36 +1,25 @@
-"""
-extractor.py – LLM-powered invoice field extractor using Ollama (local inference).
-
-Flow
-----
-1. Receive plain-text OCR output (one big string).
-2. Build a structured prompt asking the model to return strict JSON.
-3. Parse the JSON response and validate it with InvoiceExtract (Pydantic).
-4. Return the validated InvoiceExtract object.
-
-Environment variables
----------------------
-OLLAMA_HOST   - Ollama server base URL, defaults to "http://localhost:11434"
-OLLAMA_MODEL  - model name, defaults to "llama3"
-"""
-
 from __future__ import annotations
 
 import json
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import ollama
+from google import genai
+from google.genai import types
 
 from src.schemas.invoice_schema import InvoiceExtract
+from .base import BaseInvoiceExtractor
 
 logger = logging.getLogger(__name__)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-_DEFAULT_MODEL = "qwen3.5:4b"
+_DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
+_DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
 
 _SYSTEM_PROMPT = """\
 You are a precise invoice data extraction assistant.
@@ -63,60 +52,32 @@ Rules:
 - Return ONLY the JSON object.
 """
 
+# ── Ollama Concrete Extractor ──────────────────────────────────────────────────
 
-# ── Main extractor class ───────────────────────────────────────────────────────
-
-class InvoiceExtractor:
+class OllamaInvoiceExtractor(BaseInvoiceExtractor):
     """Extract structured invoice data from OCR text using a local Ollama model."""
 
     def __init__(self, model: Optional[str] = None, host: Optional[str] = None) -> None:
-        self._model = model or os.getenv("OLLAMA_MODEL", _DEFAULT_MODEL)
+        self._model = model or os.getenv("OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
         _host = host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
         self._client = ollama.Client(host=_host)
         logger.info(
-            "InvoiceExtractor initialised — model: %s  host: %s",
+            "OllamaInvoiceExtractor initialised — model: %s  host: %s",
             self._model, _host,
         )
-
-    # ── Public API ─────────────────────────────────────────────────────────────
 
     def extract(
         self,
         ocr_text: str,
         max_retries: int = 3,
-        initial_delay: float = 2.0,  # kept for API compatibility; Ollama is local so rarely needed
+        initial_delay: float = 2.0,
     ) -> InvoiceExtract:
-        """
-        Extract invoice fields from raw OCR text.
-
-        Parameters
-        ----------
-        ocr_text:
-            The concatenated plain text produced by the OCR pipeline.
-        max_retries:
-            Maximum number of retry attempts on transient errors.
-        initial_delay:
-            Seconds to wait before the first retry (doubles each attempt).
-
-        Returns
-        -------
-        InvoiceExtract
-            A validated Pydantic model containing all extracted fields.
-
-        Raises
-        ------
-        ValueError
-            If the LLM response cannot be parsed or validated.
-        Exception
-            Re-raised after exhausting retries.
-        """
         if not ocr_text.strip():
             raise ValueError("OCR text is empty — nothing to extract.")
 
         prompt = f"Invoice OCR text:\n\n{ocr_text}"
         logger.debug("Sending %d characters to Ollama…", len(prompt))
 
-        import time
         delay = initial_delay
         last_exc: Exception | None = None
 
@@ -146,31 +107,111 @@ class InvoiceExtractor:
 
         raise last_exc  # type: ignore[misc]
 
-    # ── Private helpers ────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _parse_response(raw: str) -> InvoiceExtract:
-        """Strip markdown fences (if any) and parse JSON into InvoiceExtract."""
-        # Remove ```json … ``` or ``` … ``` fences that some models emit
-        cleaned = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
+# ── Gemini Concrete Extractor ──────────────────────────────────────────────────
 
-        try:
-            data = json.loads(cleaned)
-        except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"Ollama returned non-JSON content.\n"
-                f"Raw response:\n{raw}\n"
-                f"JSON error: {exc}"
-            ) from exc
+class GeminiInvoiceExtractor(BaseInvoiceExtractor):
+    """Extract structured invoice data from OCR text using Google Gemini API."""
 
-        try:
-            invoice = InvoiceExtract(**data)
-        except Exception as exc:
-            raise ValueError(
-                f"Extracted JSON does not match the expected schema.\n"
-                f"Data: {data}\n"
-                f"Error: {exc}"
-            ) from exc
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None) -> None:
+        self._model = model or os.getenv("GEMINI_MODEL", _DEFAULT_GEMINI_MODEL)
+        _api_key = api_key or os.getenv("GEMINI_API_KEY")
 
-        return invoice
+        if _api_key:
+            self._client = genai.Client(api_key=_api_key)
+        else:
+            self._client = genai.Client()
+
+        logger.info(
+            "GeminiInvoiceExtractor initialised — model: %s",
+            self._model,
+        )
+
+    def extract(
+        self,
+        ocr_text: str,
+        max_retries: int = 3,
+        initial_delay: float = 2.0,
+    ) -> InvoiceExtract:
+        if not ocr_text.strip():
+            raise ValueError("OCR text is empty — nothing to extract.")
+
+        prompt = f"Invoice OCR text:\n\n{ocr_text}"
+        logger.debug("Sending %d characters to Gemini…", len(prompt))
+
+        delay = initial_delay
+        last_exc: Exception | None = None
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.models.generate_content(
+                    model=self._model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=_SYSTEM_PROMPT,
+                        temperature=0.0,
+                        response_mime_type="application/json",
+                        response_schema=InvoiceExtract,
+                    ),
+                )
+
+                if response.parsed:
+                    logger.debug("Successfully parsed structured output directly via Gemini SDK.")
+                    return response.parsed
+
+                raw = response.text.strip()
+                logger.debug("Raw Gemini response:\n%s", raw)
+                return self._parse_response(raw)
+
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    logger.warning(
+                        "Gemini call failed (attempt %d/%d): %s — retrying in %.0fs…",
+                        attempt + 1, max_retries, exc, delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2  # exponential back-off
+
+        raise last_exc  # type: ignore[misc]
+
+
+# ── Backward-compatible Wrapper Class ──────────────────────────────────────────
+
+class InvoiceExtractor(BaseInvoiceExtractor):
+    """
+    A backward-compatible wrapper that delegates extraction to either Ollama or Gemini.
+    By default, it checks the LLM_PROVIDER environment variable to determine the backend.
+    """
+
+    def __init__(
+        self,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        self._provider = provider or os.getenv("LLM_PROVIDER", "gemini")
+        self._provider = self._provider.lower()
+
+        if self._provider == "gemini":
+            self._delegate: BaseInvoiceExtractor = GeminiInvoiceExtractor(
+                model=model,
+                api_key=kwargs.get("api_key")
+            )
+        else:
+            self._delegate = OllamaInvoiceExtractor(
+                model=model,
+                host=kwargs.get("host")
+            )
+
+    def extract(
+        self,
+        ocr_text: str,
+        max_retries: int = 3,
+        initial_delay: float = 2.0,
+    ) -> InvoiceExtract:
+        return self._delegate.extract(
+            ocr_text=ocr_text,
+            max_retries=max_retries,
+            initial_delay=initial_delay,
+        )

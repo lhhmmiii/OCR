@@ -1,3 +1,13 @@
-from src.llm.extractor import InvoiceExtractor
+from src.llm.extractor import (
+    BaseInvoiceExtractor,
+    OllamaInvoiceExtractor,
+    GeminiInvoiceExtractor,
+    InvoiceExtractor,
+)
 
-__all__ = ["InvoiceExtractor"]
+__all__ = [
+    "BaseInvoiceExtractor",
+    "OllamaInvoiceExtractor",
+    "GeminiInvoiceExtractor",
+    "InvoiceExtractor",
+]

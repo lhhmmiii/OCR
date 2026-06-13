@@ -36,10 +36,10 @@ st.set_page_config(
 # ── Lazy imports (heavy ML libs) after page config ────────────────────────────
 from src.ocr.pipeline import OCRPipeline
 from src.schemas.ocr_config import OCRConfig, DetectionConfig, RecognitionConfig
-from src.llm.extractor import InvoiceExtractor
-from src.schemas.invoice_schema import InvoiceExtract, ItemExtract
+from src.llm.extractor import BaseInvoiceExtractor
+from src.schemas.invoice_schema import InvoiceExtract
 from database.database import SessionLocal
-from database.models import Invoice, Item
+from database.models import Invoice
 from database.repository import save_invoice
 
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
@@ -144,8 +144,17 @@ def get_ocr_pipeline() -> OCRPipeline:
 
 
 @st.cache_resource(show_spinner=False)
-def get_extractor() -> InvoiceExtractor:
-    return InvoiceExtractor()
+def get_extractor(
+    provider: str,
+    model: str | None = None,
+    host: str | None = None,
+    api_key: str | None = None,
+) -> BaseInvoiceExtractor:
+    from src.llm.extractor import OllamaInvoiceExtractor, GeminiInvoiceExtractor
+    if provider.lower() == "gemini":
+        return GeminiInvoiceExtractor(model=model, api_key=api_key)
+    else:
+        return OllamaInvoiceExtractor(model=model, host=host)
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
@@ -155,16 +164,44 @@ with st.sidebar:
     st.markdown("### ⚙️ Settings")
     min_det = st.slider("Min detection score", 0.1, 1.0, 0.5, 0.05)
     device = st.selectbox("OCR device", ["cpu", "cuda:0"])
+    
+    st.markdown("---")
+    st.markdown("### 🤖 LLM Settings")
+    llm_provider = st.selectbox("LLM Provider", ["Ollama", "Gemini"], index=0)
+    
+    if llm_provider == "Ollama":
+        ollama_model = st.text_input("Ollama Model", value=os.getenv("OLLAMA_MODEL", "qwen3.5:4b"))
+        ollama_host = st.text_input("Ollama Host", value=os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+        llm_model = ollama_model
+        llm_param = ollama_host
+        gemini_api_key = None
+    else:
+        gemini_model = st.selectbox(
+            "Gemini Model",
+            ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-pro-exp"],
+            index=0
+        )
+        gemini_api_key = st.text_input("Gemini API Key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
+        llm_model = gemini_model
+        llm_param = gemini_api_key
+        ollama_host = None
+
     st.markdown("---")
     st.markdown("### 📖 About")
     st.markdown(
         "Upload an invoice → OCR extracts raw text → "
-        "Ollama (local LLM) structures the data → save to PostgreSQL."
+        "LLM (Ollama or Gemini) structures the data → save to PostgreSQL."
     )
-    st.markdown(
-        '<span class="status-badge badge-info">Powered by Ollama</span>',
-        unsafe_allow_html=True,
-    )
+    if llm_provider == "Ollama":
+        st.markdown(
+            f'<span class="status-badge badge-info">Powered by Ollama ({llm_model})</span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f'<span class="status-badge badge-success">Powered by Gemini ({llm_model})</span>',
+            unsafe_allow_html=True,
+        )
 
 
 # ── Main layout ────────────────────────────────────────────────────────────────
@@ -220,9 +257,15 @@ with tab_upload:
                 st.session_state["ocr_results"] = ocr_results
                 st.session_state["extraction"] = None  # reset
 
-                with st.spinner("Extracting with Ollama… (local inference)"):
+                spinner_msg = f"Extracting with {llm_provider} ({llm_model})…"
+                with st.spinner(spinner_msg):
                     try:
-                        extractor = get_extractor()
+                        extractor = get_extractor(
+                            provider=llm_provider,
+                            model=llm_model,
+                            host=ollama_host,
+                            api_key=gemini_api_key,
+                        )
                         invoice_extract = extractor.extract(full_text)
                         st.session_state["extraction"] = invoice_extract
                     except Exception as exc:
